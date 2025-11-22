@@ -28,7 +28,7 @@ void DeadCode::run() {
 }
 
 bool DeadCode::clear_basic_blocks(Function *func) {
-    bool changed = false;
+    bool changed = 0;
     std::vector<BasicBlock *> to_erase;
     for (auto &bb1 : func->get_basic_blocks()) {
         auto bb = &bb1;
@@ -48,101 +48,116 @@ bool DeadCode::clear_basic_blocks(Function *func) {
 }
 
 void DeadCode::mark(Function *func) {
-    // 遍历函数所有指令，把 "关键" 指令作为起点进行递归标记
-    for (auto &bb : func->get_basic_blocks()) {
-        for (auto &instr : bb.get_instructions()) {
+    for (BasicBlock &bb : func->get_basic_blocks()) {
+        for (Instruction &instr : bb.get_instructions()) {
+
             Instruction *ins = &instr;
-            if (is_critical(ins)) {
-                mark(ins);
-            }
+            if (!is_critical(ins))
+                continue;     // 反转条件提前 continue
+
+            mark(ins);        // 执行关键指令标记
         }
     }
 }
 
+
 void DeadCode::mark(Instruction *ins) {
-    // TODO
-    if (marked.find(ins) != marked.end()) {
+    // 已经标记过则直接退出
+    if (marked.count(ins))
         return;
-    }
+
+    // 标记当前指令
     marked[ins] = true;
-    for (auto operand : ins->get_operands()) {
-        if (!operand) continue;
-        if (auto def_ins = dynamic_cast<Instruction *>(operand)) {
-            mark(def_ins);
-        }
+
+    // 遍历操作数
+    for (Value *op : ins->get_operands()) {
+        if (!op)
+            continue;
+
+        Instruction *producer = dynamic_cast<Instruction *>(op);
+        if (!producer)
+            continue;
+
+        mark(producer);
     }
 }
 
 bool DeadCode::sweep(Function *func) {
-    // TODO: 删除无用指令
-    // 提示：
-    // 1. 遍历函数的基本块，删除所有标记为true的指令
-    // 2. 删除指令后，可能会导致其他指令的操作数变为无用，因此需要再次遍历函数的基本块
-    // 3. 如果删除了指令，返回true，否则返回false
-    // 4. 注意：删除指令时，需要先删除操作数的引用，然后再删除指令本身
-    // 5. 删除指令时，需要注意指令的顺序，不能删除正在遍历的指令
+    // 删除无用指令，返回是否有修改
     bool changed = false;
 
-    // 1. 收集所有未被标记的指令
+    // 遍历函数中的每个基本块
     for (auto &bb : func->get_basic_blocks()) {
-        std::vector<Instruction *> wait_del;
+        std::vector<Instruction *> to_delete;
 
-        for (auto &instr : bb.get_instructions()) {
+        // 遍历基本块中的指令，收集需要删除的指令
+        for (Instruction &instr : bb.get_instructions()) {
             Instruction *ins = &instr;
-            if (marked.find(ins) == marked.end() || !marked[ins]) {
-                wait_del.push_back(ins);
+            // 如果指令没有被标记为 true，则加入删除列表
+            if (!marked.count(ins) || !marked[ins]) {
+                to_delete.push_back(ins);
             }
         }
 
-        for (auto ins : wait_del) {
-            // 删除指令前，先删除操作数的引用
+        // 删除收集到的指令
+        for (Instruction *ins : to_delete) {
             changed = true;
-            auto users = ins->get_use_list();
-            for (auto &use : users) {
-                User *user = use.val_;
-                if (auto user_ins = dynamic_cast<Instruction *>(user)) {
+
+            // 先处理指令的使用者，删除操作数引用
+            for (auto &use : ins->get_use_list()) {
+                if (Instruction *user_ins = dynamic_cast<Instruction *>(use.val_)) {
                     user_ins->remove_operand(use.arg_no_);
                 }
             }
+
+            // 删除指令自身的所有操作数
             ins->remove_all_operands();
+
+            // 从基本块中移除指令并释放内存
             bb.remove_instr(ins);
             ins_count++;
             delete ins;
         }
     }
-    
+
     return changed;
 }
 
+
 bool DeadCode::is_critical(Instruction *ins) {
-    // TODO: 判断指令是否是无用指令
-    // 提示：
-    // 1. 如果是函数调用，且函数是纯函数，则无用
-    // 2. 如果是无用的分支指令，则无用
-    // 3. 如果是无用的返回指令，则无用
-    // 4. 如果是无用的存储指令，则无用
+    // 判断指令是否为关键指令（不可删除）
+
+    // 1. 如果指令有使用者，则一定是关键指令
     if (!ins->get_use_list().empty()) {
         return true;
     }
 
+    // 2. 如果是函数调用，且函数非纯函数，则为关键指令
     if (ins->is_call()) {
         auto call_inst = static_cast<CallInst *>(ins);
         auto callee = call_inst->func_;
         bool is_pure = false;
+
         try {
             is_pure = func_info->is_pure_function(callee);
         } catch (const std::out_of_range &) {
+            // 如果找不到函数信息，默认认为非纯函数
             is_pure = false;
         }
+
+        // 非纯函数调用是关键指令，纯函数调用可删除
         return !is_pure;
     }
 
+    // 3. 分支、返回和存储指令都是关键指令
     if (ins->is_br() || ins->is_ret() || ins->is_store()) {
         return true;
     }
 
+    // 其他指令可视为非关键指令（可能被删除）
     return false;
 }
+
 
 void DeadCode::sweep_globally() {
     std::vector<Function *> unused_funcs;
