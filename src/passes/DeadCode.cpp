@@ -28,7 +28,7 @@ void DeadCode::run() {
 }
 
 bool DeadCode::clear_basic_blocks(Function *func) {
-    bool changed = false;
+    bool changed = 0;
     std::vector<BasicBlock *> to_erase;
     for (auto &bb1 : func->get_basic_blocks()) {
         auto bb = &bb1;
@@ -48,16 +48,18 @@ bool DeadCode::clear_basic_blocks(Function *func) {
 }
 
 void DeadCode::mark(Function *func) {
-    // 遍历函数所有指令，把 "关键" 指令作为起点进行递归标记
-    for (auto &bb : func->get_basic_blocks()) {
-        for (auto &instr : bb.get_instructions()) {
+    for (BasicBlock &bb : func->get_basic_blocks()) {
+        for (Instruction &instr : bb.get_instructions()) {
+
             Instruction *ins = &instr;
-            if (is_critical(ins)) {
-                mark(ins);
-            }
+            if (!is_critical(ins))
+                continue;     // 反转条件提前 continue
+
+            mark(ins);        // 执行关键指令标记
         }
     }
 }
+
 
 void DeadCode::mark(Instruction *ins) {
     // TODO
