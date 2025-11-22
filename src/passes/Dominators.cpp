@@ -117,7 +117,7 @@ void Dominators::create_dom_dfs_order(Function *f) {
     // 分析得到 f 中各个基本块的支配树上的dfs序L,R
     unsigned int order = 0;
     std::function<void(BasicBlock *)> dfs = [&](BasicBlock *bb) {
-        dom_tree_L_[bb] = ++ order;
+        dom_tree_L_[bb] = ++order;
         dom_dfs_order_.push_back(bb);
         for (auto &succ : dom_tree_succ_blocks_[bb]) {
             dfs(succ);
@@ -125,9 +125,12 @@ void Dominators::create_dom_dfs_order(Function *f) {
         dom_tree_R_[bb] = order;
     };
     dfs(f->get_entry_block());
+
+    // C++14 写法：必须指定模板参数
     dom_post_order_ =
-        std::vector(dom_dfs_order_.rbegin(), dom_dfs_order_.rend());
+        std::vector<BasicBlock*>(dom_dfs_order_.rbegin(), dom_dfs_order_.rend());
 }
+
 
 void Dominators::print_idom(Function *f) {
     f->get_parent()->set_print_name();
